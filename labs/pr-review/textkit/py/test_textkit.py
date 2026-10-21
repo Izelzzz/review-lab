@@ -1,6 +1,6 @@
 import unittest
 
-from textkit import truncate, word_count
+from textkit import mean_word_length, truncate, word_count
 
 
 class TestTextkit(unittest.TestCase):
@@ -13,6 +13,10 @@ class TestTextkit(unittest.TestCase):
         self.assertEqual(truncate("short", 10), "short")
         with self.assertRaises(ValueError):
             truncate("abc", 2)
+
+    def test_mean_word_length(self):
+        self.assertEqual(mean_word_length("hi there"), 3.5)
+        self.assertEqual(mean_word_length("  one   two  "), 3.0)
 
 
 if __name__ == "__main__":
