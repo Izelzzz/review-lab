@@ -15,3 +15,10 @@ export function truncate(text: string, limit: number): string {
   }
   return text.slice(0, limit - 3) + "...";
 }
+
+/** Return the average length of the words in text. */
+export function meanWordLength(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((sum, w) => sum + [...w].length, 0);
+  return total / words.length;
+}
