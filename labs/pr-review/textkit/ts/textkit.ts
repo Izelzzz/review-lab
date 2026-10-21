@@ -15,3 +15,8 @@ export function truncate(text: string, limit: number): string {
   }
   return text.slice(0, limit - 3) + "...";
 }
+
+/** Return true if text starts with any of the given prefixes. */
+export function hasPrefix(text: string, prefixes: string[]): boolean {
+  return prefixes.some((p) => text.startsWith(p));
+}
