@@ -13,3 +13,8 @@ def truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def has_prefix(text: str, prefixes: list[str]) -> bool:
+    """Return True if text starts with any of the given prefixes."""
+    return any(text.startswith(p) for p in prefixes)
