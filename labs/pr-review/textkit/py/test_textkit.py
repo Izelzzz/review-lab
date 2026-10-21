@@ -1,6 +1,6 @@
 import unittest
 
-from textkit import truncate, word_count
+from textkit import render_template, truncate, word_count
 
 
 class TestTextkit(unittest.TestCase):
@@ -13,6 +13,10 @@ class TestTextkit(unittest.TestCase):
         self.assertEqual(truncate("short", 10), "short")
         with self.assertRaises(ValueError):
             truncate("abc", 2)
+
+    def test_render_template(self):
+        self.assertEqual(render_template("greeting.txt", {"name": "Ada"}), "Hello, Ada!\n")
+        self.assertEqual(render_template("greeting.txt", {}), "Hello, {name}!\n")
 
 
 if __name__ == "__main__":
