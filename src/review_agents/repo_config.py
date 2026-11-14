@@ -59,6 +59,7 @@ class Dimensions(_Strict):
 # The longest a review may run and the most tools one dimension agent may call: safety
 # nets, not design limits (decisions D-016, D-028); a repository can only lower them.
 MAX_REVIEW_MINUTES = 30
+MAX_REVIEW_ROUNDS = 10
 MAX_TOOL_CALLS_PER_AGENT = 50
 
 
@@ -72,7 +73,8 @@ class Limits(_Strict):
         default=MAX_TOOL_CALLS_PER_AGENT, ge=1, le=MAX_TOOL_CALLS_PER_AGENT
     )
     review_minutes: int = Field(default=MAX_REVIEW_MINUTES, ge=1, le=MAX_REVIEW_MINUTES)
-    full_review_rounds: int = Field(default=3, ge=1, le=3)
+    # Pushes reviewed per PR (D-039); later pushes are not, unless `/review` asks.
+    full_review_rounds: int = Field(default=MAX_REVIEW_ROUNDS, ge=1, le=MAX_REVIEW_ROUNDS)
     replies_per_thread: int = Field(default=10, ge=1, le=10)
     nits_per_report: int = Field(default=5, ge=0, le=5)
 

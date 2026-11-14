@@ -1223,6 +1223,95 @@ def test_walkthrough_first_still_finds_problems_when_the_walkthrough_fails(setup
     assert status == "error" and error is not None
 
 
+# --- rounds (issue #12, D-039) ---------------------------------------------------
+
+EARLIER_SUMMARY = (
+    "<!-- review-agents:summary -->\n## 审查结论：未发现阻断问题\n\n- 🟡 earlier finding\n\n"
+    '<!-- review-agents:counts {"blocking": 0, "important": 1, "complete": true} -->\n'
+)
+
+
+def earlier(setup: Setup, round_: int, status: str = "done", superseded: bool = False) -> int:
+    """A review of the same PR that came before, as the worker left it."""
+    earlier.count += 1  # type: ignore[attr-defined]
+    review_id = setup.queue(head=f"{earlier.count:040x}")  # type: ignore[attr-defined]
+    report = {"summary": EARLIER_SUMMARY, "comments": [], "counts": {"complete": True}}
+    with closing(connect(setup.settings.db_path)) as conn:
+        conn.execute(
+            "UPDATE reviews SET status = ?, round = ?, report = ?, superseded_by = ?,"
+            " finished_at = 'x' WHERE id = ?",
+            (status, round_, json.dumps(report), review_id if superseded else None, review_id),
+        )
+    return review_id
+
+
+earlier.count = 0  # type: ignore[attr-defined]
+
+
+def test_a_review_takes_the_round_after_the_last_finished_one(setup: Setup) -> None:
+    earlier(setup, 1)
+    earlier(setup, 2)
+    earlier(setup, 3, status="failed")  # a failed or superseded review is not a round
+    earlier(setup, 3, superseded=True)
+    review_id = setup.queue()
+
+    setup.run(review_id, ByDimension(scripts={}))
+
+    assert setup.review(review_id)["round"] == 3
+
+
+def test_a_pr_s_first_review_is_round_one(setup: Setup) -> None:
+    review_id = setup.queue()
+
+    setup.run(review_id, ByDimension(scripts={}))
+
+    assert setup.review(review_id)["round"] == 1
+
+
+def test_past_ten_rounds_a_push_is_not_reviewed(setup: Setup) -> None:
+    earlier(setup, 10)
+    review_id = setup.queue()
+    model = ByDimension(scripts={})
+
+    setup.run(review_id, model)
+
+    assert model.seen == [] and model.order == []  # no model was asked anything
+    review = setup.review(review_id)
+    assert review["status"] == "done" and review["round"] == 10
+    report = json.loads(review["report"])
+    assert report["skipped"] == {"reason": "round_limit", "round": 11, "limit": 10}
+    assert report["counts"] is None and report["comments"] == []
+    summary = report["summary"]
+    assert summary.startswith("<!-- review-agents:summary -->")
+    assert "10 轮" in summary and "/review" in summary
+    assert "earlier finding" in summary  # the last round's findings stay up
+    assert "review-agents:counts" not in summary
+    assert setup.findings(review_id) == []
+
+
+def test_a_repository_may_review_fewer_rounds(setup: Setup) -> None:
+    earlier(setup, 2)
+    review_id = setup.queue("limits:\n  full_review_rounds: 2\n")
+
+    setup.run(review_id, ByDimension(scripts={}))
+
+    assert json.loads(setup.review(review_id)["report"])["skipped"]["limit"] == 2
+
+
+def test_a_review_command_reviews_past_the_limit(setup: Setup) -> None:
+    earlier(setup, 10)
+    review_id = setup.queue()
+    with closing(connect(setup.settings.db_path)) as conn:
+        conn.execute("UPDATE reviews SET event = 'manual' WHERE id = ?", (review_id,))
+    model = ByDimension(scripts={})
+
+    setup.run(review_id, model)
+
+    review = setup.review(review_id)
+    assert review["round"] == 11 and "skipped" not in json.loads(review["report"])
+    assert sorted(set(model.seen)) == sorted(ALL)
+
+
 # --- secrets (issue #15) ---------------------------------------------------------
 
 LEAKED = "ghp_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"

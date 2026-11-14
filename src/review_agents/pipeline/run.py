@@ -61,7 +61,7 @@ from review_agents.pipeline.schedule import DIMENSION_TURN, Slots, verify_priori
 from review_agents.pipeline.strategy import Plan, plan
 from review_agents.pipeline.verify import VERIFIER_TOOL_CALLS, VerificationRun, run_verifier
 from review_agents.redact import REDACT
-from review_agents.repo_config import MAX_REVIEW_MINUTES, read_repo_config
+from review_agents.repo_config import MAX_REVIEW_MINUTES, RepoConfig, read_repo_config
 from review_agents.report import (
     Item,
     MissedStep,
@@ -71,6 +71,7 @@ from review_agents.report import (
     added_lines,
     build_report,
     is_binary,
+    round_limit_report,
 )
 from review_agents.tools import RepoTools
 from review_agents.walkthrough import (
@@ -158,6 +159,43 @@ def _step(
         " VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?)",
         # Masked: an error may quote a token or a key (issue #15).
         (review_id, node, started, "error" if error else "ok", REDACT.optional(error), note),
+    )
+
+
+def _last_round(conn: sqlite3.Connection, review: sqlite3.Row) -> sqlite3.Row | None:
+    """The PR's latest round: the last earlier review that finished and was not replaced.
+
+    A failed or superseded review is not a round, nor a push past the limit, which keeps
+    the round it found.
+    """
+    row: sqlite3.Row | None = conn.execute(
+        "SELECT round, report FROM reviews WHERE repo = ? AND pr = ? AND id < ?"
+        " AND status = 'done' AND superseded_by IS NULL"
+        " AND json_extract(report, '$.skipped') IS NULL ORDER BY id DESC LIMIT 1",
+        (review["repo"], review["pr"], review["id"]),
+    ).fetchone()
+    return row
+
+
+def _skip_past_round_limit(
+    conn: sqlite3.Connection,
+    review_id: int,
+    round_: int,
+    limit: int,
+    last: sqlite3.Row | None,
+    config: RepoConfig,
+) -> None:
+    """Finish a push past the round limit unreviewed; its summary keeps the last findings."""
+    previous = json.loads(last["report"]) if last is not None and last["report"] else {}
+    report = round_limit_report(
+        round_, limit, previous.get("summary"), last["round"] if last else 0, config.language
+    )
+    _step(conn, review_id, "rounds", _now(conn), note=f"round {round_} is past the limit {limit}")
+    conn.execute(
+        "UPDATE reviews SET status = 'done', error = NULL, round = ?, report = ?,"
+        " finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+        # Masked like every report CI gets (issue #15).
+        (round_ - 1, json.dumps(REDACT.every_string(report.as_json())), review_id),
     )
 
 
@@ -321,6 +359,13 @@ def run_review(
     # An invalid config falls back to the defaults as a whole (D-001); the step says why.
     _step(conn, review_id, "config", step, "; ".join(loaded.errors) or None)
     limits = config.limits
+    # D-039: a push is a round; past the repository's limit only `/review` is reviewed.
+    last = _last_round(conn, review)
+    round_ = (last["round"] if last is not None else 0) + 1
+    if round_ > limits.full_review_rounds and review["event"] != "manual":
+        _skip_past_round_limit(conn, review_id, round_, limits.full_review_rounds, last, config)
+        return
+    conn.execute("UPDATE reviews SET round = ? WHERE id = ?", (round_, review_id))
     deadline = started_at + (
         review_seconds if review_seconds is not None else limits.review_minutes * 60
     )

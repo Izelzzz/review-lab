@@ -83,7 +83,7 @@ def test_at_least_one_dimension_must_stay_enabled() -> None:
     [
         ("tool_calls_per_agent", 51),
         ("review_minutes", 31),
-        ("full_review_rounds", 4),
+        ("full_review_rounds", 11),
         ("replies_per_thread", 11),
         ("nits_per_report", 6),
         ("tokens_per_review", 0),
@@ -243,6 +243,11 @@ def test_a_tag_named_like_the_branch_is_not_read(repo: Path) -> None:
     git(repo, "tag", "main")
 
     assert read_repo_config(repo, "main").config.dimensions.security is True
+
+
+def test_a_pr_is_reviewed_ten_rounds_at_most_by_default() -> None:
+    # D-039: a PR is often pushed many times; past the limit pushes are not reviewed.
+    assert RepoConfig().limits.full_review_rounds == 10
 
 
 @pytest.mark.parametrize("value", ["true", "false", "maybe"])

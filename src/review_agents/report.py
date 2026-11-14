@@ -102,14 +102,19 @@ class Report:
     counts: dict[str, int | bool] = field(default_factory=dict)
     # The first comment, the walkthrough (D-035); set once it is written.
     walkthrough: str | None = None
+    # Why the push was not reviewed (D-039): CI shows the required check as skipped.
+    skipped: dict[str, object] | None = None
 
     def as_json(self) -> dict[str, object]:
-        return {
+        out: dict[str, object] = {
             "summary": self.summary,
             "comments": [asdict(c) for c in self.comments],
-            "counts": self.counts,
+            "counts": self.counts or None,
             "walkthrough": self.walkthrough,
         }
+        if self.skipped is not None:
+            out["skipped"] = self.skipped
+        return out
 
 
 _TEXT: dict[Language, dict[str, str]] = {
@@ -120,6 +125,11 @@ _TEXT: dict[Language, dict[str, str]] = {
         "nit": "⚪ 细节",
         "must_fix": "审查结论：需要先处理 {n} 条 🔴",
         "no_blocking": "审查结论：未发现阻断问题",
+        "round_limit": "审查结论：这次推送没有审查",
+        "round_limit_why": "这个 PR 已经自动审查了 {limit} 轮，到了上限，之后的推送不再自动审查。"
+        "改了很多轮还在改，往往说明方案本身值得重新审视。需要时在 PR 下评论 `/review`，"
+        "会再完整审查一次。",
+        "round_limit_last": "以下是第 {round} 轮（最后一次审查）的结论，没有包含之后的改动：",
         "incomplete": "审查结论：审查未完成，以下只是已完成部分的结果",
         "count": "（{n}）",
         "see_inline": "见行间评论",
@@ -187,6 +197,12 @@ _TEXT: dict[Language, dict[str, str]] = {
         "nit": "⚪ Nits",
         "must_fix": "Review: {n} 🔴 to address first",
         "no_blocking": "Review: No blocking problems found",
+        "round_limit": "Review: this push was not reviewed",
+        "round_limit_why": "This PR has been reviewed {limit} times, the limit, so later pushes"
+        " are not reviewed automatically. Many rounds of changes often mean the approach"
+        " itself deserves a second look. Comment `/review` on the PR for one more full review.",
+        "round_limit_last": "What round {round}, the last review, found; later changes are"
+        " not in it:",
         "incomplete": "Review: incomplete; what follows covers only the parts that finished",
         "count": " ({n})",
         "see_inline": "see the inline comment",
@@ -530,4 +546,26 @@ def _stats(w: _Writer, scope: Scope, stats: Stats) -> str:
     took = t["minutes"].format(m=minutes, s=seconds) if minutes else t["seconds"].format(s=seconds)
     return t["stats"].format(
         mode=scope.mode.capitalize(), tokens=f"{stats.tokens:,}", time=took, id=stats.review_id
+    )
+
+
+_COUNTS_LINE = re.compile(r"\n?<!-- review-agents:counts .*?-->\n?")
+
+
+def round_limit_report(
+    round_: int, limit: int, last: str | None, last_round: int, language: Language
+) -> Report:
+    """The summary of a push past the round limit (D-039): not reviewed, and why.
+
+    The last review's findings stay up beneath, without its counts line: CI takes a
+    summary without one for one with no conclusion of its own.
+    """
+    t = _TEXT[language]
+    parts = [SUMMARY_MARKER, f"## {t['round_limit']}", "", t["round_limit_why"].format(limit=limit)]
+    if last:
+        body = _COUNTS_LINE.sub("\n", last.replace(SUMMARY_MARKER, "", 1)).strip()
+        parts += ["", t["round_limit_last"].format(round=last_round), "", body]
+    return Report(
+        summary="\n".join(parts) + "\n",
+        skipped={"reason": "round_limit", "round": round_, "limit": limit},
     )
