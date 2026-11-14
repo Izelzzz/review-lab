@@ -331,3 +331,26 @@ def test_a_manual_review_request_starts_a_fresh_review_of_the_same_commit(
 
     assert manual.status_code == 202
     assert manual.json()["id"] != first
+
+
+def test_a_secret_written_into_a_finding_is_masked_in_the_poll(client: Client) -> None:
+    # CI logs what it polls; a model may have copied a token into a finding (issue #15).
+    leaked = "ghp_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"
+    review_id = client.request("POST", "/v1/reviews", REQUEST).json()["id"]
+    with closing(connect(client.db_path)) as conn:
+        conn.execute(
+            "INSERT INTO findings (review_id, fingerprint, primary_dimension, severity,"
+            " file, line_start, line_end, title, body, evidence, basis)"
+            " VALUES (?, 'f1', 'security', 'important', 'a.py', 3, 4, ?, ?, 'e', ?)",
+            (
+                review_id,
+                f"token {leaked} committed",
+                f"It is {leaked}.",
+                json.dumps([{"kind": "path", "explanation": leaked}]),
+            ),
+        )
+
+    [found] = client.request("GET", f"/v1/reviews/{review_id}").json()["findings"]
+
+    assert leaked not in json.dumps(found)
+    assert found["title"] == "token *** committed" and found["basis"][0]["explanation"] == "***"

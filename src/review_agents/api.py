@@ -13,6 +13,7 @@ from review_agents.config import Settings
 from review_agents.credentials import TokenVault
 from review_agents.db import connect, migrate
 from review_agents.mirror import check_commit_sha, check_repo_name
+from review_agents.redact import REDACT
 from review_agents.repo_config import check_branch_name
 from review_agents.worker import ReviewHandler, Worker, not_implemented
 
@@ -228,15 +229,19 @@ def create_app(
         result["report"] = json.loads(row["report"]) if row["report"] is not None else None
         if row["superseded_by"] is not None:
             result["status"] = "superseded"
-        result["findings"] = [
-            {
-                **dict(f),
-                "dimensions": json.loads(f["dimensions"]),
-                "basis": json.loads(f["basis"]),
-                "preexisting": bool(f["preexisting"]),
-            }
-            for f in findings
-        ]
+        # Masked too: CI logs what it polls, and a model may have copied a secret into a
+        # finding; the stored text is the reviewed code's, as the mirror has it (issue #15).
+        result["findings"] = REDACT.every_string(
+            [
+                {
+                    **dict(f),
+                    "dimensions": json.loads(f["dimensions"]),
+                    "basis": json.loads(f["basis"]),
+                    "preexisting": bool(f["preexisting"]),
+                }
+                for f in findings
+            ]
+        )
         return result
 
     @app.get("/healthz")

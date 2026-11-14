@@ -60,6 +60,7 @@ from review_agents.pipeline.nits import NIT_MERGE_SECONDS, merge_nits
 from review_agents.pipeline.schedule import DIMENSION_TURN, Slots, verify_priority
 from review_agents.pipeline.strategy import Plan, plan
 from review_agents.pipeline.verify import VERIFIER_TOOL_CALLS, VerificationRun, run_verifier
+from review_agents.redact import REDACT
 from review_agents.repo_config import MAX_REVIEW_MINUTES, RepoConfig, read_repo_config
 from review_agents.report import (
     Item,
@@ -156,7 +157,8 @@ def _step(
     conn.execute(
         "INSERT INTO steps (review_id, node, started_at, finished_at, status, error, note)"
         " VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?)",
-        (review_id, node, started, "error" if error else "ok", error, note),
+        # Masked: an error may quote a token or a key (issue #15).
+        (review_id, node, started, "error" if error else "ok", REDACT.optional(error), note),
     )
 
 
@@ -192,7 +194,8 @@ def _skip_past_round_limit(
     conn.execute(
         "UPDATE reviews SET status = 'done', error = NULL, round = ?, report = ?,"
         " finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-        (round_ - 1, json.dumps(report.as_json()), review_id),
+        # Masked like every report CI gets (issue #15).
+        (round_ - 1, json.dumps(REDACT.every_string(report.as_json())), review_id),
     )
 
 
@@ -550,7 +553,12 @@ def run_review(
         conn.execute(
             "UPDATE reviews SET limit_hit = ?, status = 'done', error = NULL, report = ?,"
             " finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-            (limit_hit, json.dumps(replace(report, walkthrough=walkthrough).as_json()), review_id),
+            # What CI posts: a secret a finding quotes from the code is masked (issue #15).
+            (
+                limit_hit,
+                json.dumps(REDACT.every_string(replace(report, walkthrough=walkthrough).as_json())),
+                review_id,
+            ),
         )
         conn.execute("COMMIT")
     except BaseException:

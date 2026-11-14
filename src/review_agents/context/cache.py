@@ -12,6 +12,7 @@ from pathlib import Path
 
 from review_agents.context.modules import MODULE_TOKENS, SUMMARY_VERSION, Summarize
 from review_agents.context.repo_layer import RepoLayer, build_repo_layer
+from review_agents.redact import REDACT
 
 _locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 _locks_guard = threading.Lock()
@@ -73,7 +74,7 @@ def _step(
     conn.execute(
         "INSERT INTO steps (review_id, node, started_at, finished_at, status, error)"
         " VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
-        (review_id, node, started, "error" if error else "ok", error),
+        (review_id, node, started, "error" if error else "ok", REDACT.optional(error)),
     )
 
 

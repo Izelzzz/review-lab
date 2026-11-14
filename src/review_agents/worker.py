@@ -6,6 +6,7 @@ from contextlib import closing
 from pathlib import Path
 
 from review_agents.db import connect
+from review_agents.redact import REDACT
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,8 @@ def finish(conn: sqlite3.Connection, review_id: int, error: str | None) -> None:
     conn.execute(
         "UPDATE reviews SET status = ?, error = ?,"
         " finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-        ("failed" if error else "done", error, review_id),
+        # Masked: the error is returned to CI, which may post it (issue #15).
+        ("failed" if error else "done", REDACT.optional(error), review_id),
     )
 
 
